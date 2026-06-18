@@ -1460,36 +1460,31 @@ function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 async function callTencentASR(file) {
   var arrayBuffer = await file.arrayBuffer();
   var base64 = arrayBufferToBase64(arrayBuffer);
-  var ext = file.name.split('.').pop().toLowerCase();
-  var fmtMap = { m4a: 'm4a', mp3: 'mp3', wav: 'wav', amr: 'amr', flac: 'flac' };
-  var voiceFormat = fmtMap[ext] || 'm4a';
 
-  // Use CreateRecTask for longer audio (async + polling)
   var resultDiv = document.getElementById('transcriptResult');
   resultDiv.innerHTML = '<div class="transcript-area">\u6b63\u5728\u4e0a\u4f20\u97f3\u9891\u5e76\u521b\u5efa\u8bc6\u522b\u4efb\u52a1...</div>';
 
-  var createResp = await tc3Request('CreateRecTask', {
-    EngineModelType: '16k_zh',
-    ChannelNum: 1,
-    ResTextFormat: 0,
-    SourceType: 1,
-    Data: base64,
-    DataLen: arrayBuffer.byteLength
+  var createResp = await fetch('/api/asr', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'CreateRecTask', audio: base64, dataLen: arrayBuffer.byteLength })
   });
-
-  var taskId = createResp.Data && createResp.Data.TaskId;
+  var createJson = await createResp.json();
+  if (createJson.error) throw new Error(createJson.error);
+  var taskId = createJson.taskId;
   if (!taskId) throw new Error('\u521b\u5efa\u4efb\u52a1\u5931\u8d25');
 
   resultDiv.innerHTML = '<div class="transcript-area">\u6b63\u5728\u8bc6\u522b\u4e2d\uff0c\u8bf7\u7a0d\u5019...</div>';
 
-  // Poll for result
   for (var i = 0; i < 60; i++) {
     await sleep(3000);
-    var statusResp = await tc3Request('DescribeTaskStatus', { TaskId: taskId });
-    var data = statusResp.Data;
-    if (!data) continue;
-    if (data.Status === 2) return data.Result || '';
-    if (data.Status === 3) throw new Error(data.ErrorMsg || '\u8bc6\u522b\u5931\u8d25');
+    var statusResp = await fetch('/api/asr', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'DescribeTaskStatus', taskId: taskId })
+    });
+    var statusJson = await statusResp.json();
+    if (statusJson.error) throw new Error(statusJson.error);
+    if (statusJson.status === 2) return statusJson.result || '';
+    if (statusJson.status === 3) throw new Error(statusJson.errorMsg || '\u8bc6\u522b\u5931\u8d25');
     resultDiv.innerHTML = '<div class="transcript-area">\u6b63\u5728\u8bc6\u522b\u4e2d... (' + ((i + 1) * 3) + 's)</div>';
   }
   throw new Error('\u8bc6\u522b\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5');
